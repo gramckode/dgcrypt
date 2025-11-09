@@ -11,8 +11,9 @@ function get_diskname_options()
 function _dgcrypt_completion() 
 {
     local cur="${COMP_WORDS[COMP_CWORD]}"
-    local first_opts="open close"
-    local second_opts="$(get_diskname_options)"
+    local first_opts="$(get_diskname_options)"
+    local second_opts="open close"
+    
 
     COMPREPLY=()
 

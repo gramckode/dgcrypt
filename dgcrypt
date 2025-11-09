@@ -1,5 +1,6 @@
 #!/bin/bash
 ################################################################################
+# V 1.0
 # dgcrypt - wrapper utility to simplify using luks encrypted volumes on the fly
 #
 # + Package dependencies:
@@ -59,7 +60,7 @@ function open_disk()
   DISKNAME="$1"
   read_disk_config "$DISKNAME"
   if ! [ -d "$MOUNTPOINT" ]; then
-    echo "Error: mountpoint ${MOUNTPOINT} not found" > &2
+    echo "Error: mountpoint ${MOUNTPOINT} not found" >&2
     exit 35
   fi
   OPEN_CMD="cryptsetup open /dev/disk/by-uuid/${DISK_UUID} ${LABEL}"
@@ -159,7 +160,7 @@ function read_disk_config()
 function usage()
 {
   echo "Usage:"
-  echo -e "\tdgcrypt [open|close] <diskname>"
+  echo -e "\tdgcrypt <diskname> [open|close]"
   echo -e "\tRelies on configuration file ~/.dgcrypt/disk_configs.json"
   echo -e "\tRead comment at top of script for details..."
 }
@@ -174,8 +175,8 @@ if ! [ "$(whoami)" == "root" ]; then
   exit 101
 fi
 #Args:
-ACTION="$1"
-DISKNAME="$2"
+ACTION="$2"
+DISKNAME="$1"
 
 check_dependencies
 
