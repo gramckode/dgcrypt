@@ -154,9 +154,10 @@ function read_disk_config()
 
 function usage()
 {
-  echo "dgcrypt [open|close] diskname"
-  echo "Relies on configuration file ~/.dgcrypt/disk_configs.json"
-  echo "Read comment at top of script for details..."
+  echo "Usage:"
+  echo -e "\tdgcrypt [open|close] <diskname>"
+  echo -e "\tRelies on configuration file ~/.dgcrypt/disk_configs.json"
+  echo -e "\tRead comment at top of script for details..."
 }
 
 ### MAIN ###
@@ -164,20 +165,22 @@ if [ "$1" == "--help" ] || [ "$1" == "-h" ]; then
   usage
   exit 0
 fi
+if ! [ "$(whoami)" == "root" ]; then
+  echo "Error: run this using sudo" >&2
+  exit 101
+fi
 #Args:
 ACTION="$1"
 DISKNAME="$2"
 
 check_dependencies
 
-if ! [ "$(whoami)" == "root" ]; then
-  echo "Error: run this using sudo"
-fi
-
 if [ "$ACTION" == "open" ]; then
   open_disk "$DISKNAME"
 elif [ "$ACTION" == "close" ]; then
   close_disk "$DISKNAME"
 else
-  echo
+  echo "Error: unrecognized or missing argument" >&2
+  usage
+  exit 100
 fi
