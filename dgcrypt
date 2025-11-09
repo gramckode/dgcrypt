@@ -58,6 +58,10 @@ function open_disk()
 {
   DISKNAME="$1"
   read_disk_config "$DISKNAME"
+  if ! [ -d "$MOUNTPOINT" ]; then
+    echo "Error: mountpoint ${MOUNTPOINT} not found" > &2
+    exit 35
+  fi
   OPEN_CMD="cryptsetup open /dev/disk/by-uuid/${DISK_UUID} ${LABEL}"
   if ! [ -z "$KEY_FILE_LOCATION" ]; then
     OPEN_CMD="$OPEN_CMD --key-file ${KEY_FILE_LOCATION}"
