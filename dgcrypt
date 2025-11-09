@@ -1,0 +1,183 @@
+#!/bin/bash
+################################################################################
+# dgcrypt - wrapper utility to simplify using luks encrypted volumes on the fly
+#
+# + Package dependencies:
+#   - cryptsetup
+#   - jq
+#
+# + Configuration:
+#   - This script relies on a json file which should be located at
+#       ~/.dgcrypt/disk_configs.json
+#
+#   - Example contents for disk_configs.json:
+#     {
+#       "My_Awesome_Disk":{
+#           "DISK_UUID":"03257133-6797-4449-8661-e4aeb8438db0",
+#           "LABEL":"MyAwesomeDisk",
+#           "MOUNTPOINT":"/media/MyAwesomeDisk"
+#       },
+#       "My_Other_Awesome_Disk":{
+#           "DISK_UUID":"01b9145a-dfce-4f8d-845f-1b5d96a2b324",
+#           "KEY_FILE_LOCATION":"/home/MyAwesomeUser/My/Secret/KeyFile",
+#           "LABEL":"MyOtherAwesomeDisk",
+#           "MOUNTPOINT":"/my/custom/mountpoint/for/this/disk"
+#       }
+#     }
+
+#   - disk_configs.json contains a json dictionary of disknames mapped
+#       to corresponding dictionaries of config values for those disks
+#
+#       - The diskname is whatever you want to call the disk
+#
+#       - The config for disks MUST contain these keys / values:
+#           - "DISK_UUID" - the UUID for the device
+#               (as found in /dev/disk/by-uuid)
+#           - "LABEL" - a filesystem label for the device in luks
+#           - "MOUNTPOINT" - the path to mount the decrypted device
+#
+#       - Optional config values for disks:
+#           - "KEY_FILE_LOCATION" - a keyfile used to decrypt the disk
+#               if this is omitted, then cryptsetup will prompt for a password
+################################################################################
+
+
+function check_dependencies()
+{
+  if ! which cryptsetup > /dev/null; then
+    echo "Missing cryptsetup package" >&2
+    exit 4
+  fi
+    if ! which jq > /dev/null; then
+    echo "Missing jq package" >&2
+    exit 4
+  fi
+}
+
+function open_disk()
+{
+  DISKNAME="$1"
+  read_disk_config "$DISKNAME"
+  OPEN_CMD="cryptsetup open /dev/disk/by-uuid/${DISK_UUID} ${LABEL}"
+  if ! [ -z "$KEY_FILE_LOCATION" ]; then
+    OPEN_CMD="$OPEN_CMD --key-file ${KEY_FILE_LOCATION}"
+  fi
+  if $OPEN_CMD; then
+    echo "Info: Opened disk with label: ${LABEL}"
+  else
+    echo "Error: failure occurred while trying to open disk with cryptsetup" >&2
+    exit 33
+  fi
+  if mount "/dev/mapper/${LABEL}" "${MOUNTPOINT}"; then
+    echo "Info: Mounted disk with label ${LABEL} at ${MOUNTPOINT}"
+  else
+    echo "Error: failure occurred while trying to mount disk" >&2
+    exit 34
+  fi
+  echo "SUCCESS: ${DISKNAME} was opened and mounted"
+}
+
+function close_disk()
+{
+  DISKNAME="$1"
+  read_disk_config "$DISKNAME"
+  sync; sync; sync;
+
+  if ! umount "${MOUNTPOINT}"; then
+    echo "Error: non-zero exit code while attempting to unmount ${MOUNTPOINT}" >&2
+    exit 10
+  fi
+
+  if mount | grep " ${MOUNTPOINT} "; then
+    echo "ERROR: ${MOUNTPOINT} may still be mounted" >&2
+    exit 11
+  fi
+  echo "Info: ${MOUNTPOINT} was unmounted"
+
+  if ! cryptsetup close "${LABEL}"; then
+    echo "Error: non-zero exit code while running crypsetup close for label: ${LABEL}" >&2
+    exit 12
+  fi
+  echo "Info: ${LABEL} was closed"
+  echo "SUCCESS: ${DISKNAME} is closed and unmounted"
+
+}
+
+function read_disk_config()
+{
+  function ensure_var_is_set()
+  { #Helper function to ensure expected config values exist
+    VAR_NAME="$1"
+    VAR_VALUE="$2"
+    if [ "$VAR_VALUE" == "null" ] || [ -z "$VAR_VALUE" ]; then
+    echo "Error: required value ${VAR_NAME} is missing from disk config for ${DISKNAME}" >&2
+    exit 22
+    fi
+  }
+
+  DISKNAME="$1" #should be top-level key in disk config
+  if [ -z "$SUDO_USER" ]; then
+    echo "Error: could not determine real user from \$SUDO_USER" >&2
+    exit 23
+  else
+    USER_HOME_DIR="$(grep ${SUDO_USER} /etc/passwd | cut -d : -f 6)"
+    if [ -z "$USER_HOME_DIR" ]; then
+      echo "Error: could could not determine user homedir" >&2
+      exit 24
+    fi
+  fi
+
+  DISK_CONFIGS_FILE="${USER_HOME_DIR}/.dgcrypt/disk_configs.json"
+
+  #check that we can read config and that config exists for disk
+  if ! [[ -e "$DISK_CONFIGS_FILE" && -r "$DISK_CONFIGS_FILE" ]]; then
+    echo "Error: unable to read disk config file: ${DISK_CONFIGS_FILE}" >&2
+    exit 20
+  fi
+
+  if [ "$(jq ".${DISKNAME}" $DISK_CONFIGS_FILE)" == "null" ]; then
+    echo "Error: ${DISKNAME} did not match any disks in $DISK_CONFIGS_FILE" >&2
+    exit 21
+  fi
+  #get values
+  DISK_UUID="$(jq -r ".${DISKNAME}.DISK_UUID" $DISK_CONFIGS_FILE)"
+  ensure_var_is_set "DISK_UUID" "$DISK_UUID"
+  LABEL="$(jq -r ".${DISKNAME}.LABEL" $DISK_CONFIGS_FILE)"
+  ensure_var_is_set "LABEL" "$LABEL"
+  MOUNTPOINT="$(jq -r ".${DISKNAME}.MOUNTPOINT" $DISK_CONFIGS_FILE)"
+  ensure_var_is_set "MOUNTPOINT" "$MOUNTPOINT"
+  KEY_FILE_LOCATION="$(jq -r ".${DISKNAME}.KEY_FILE_LOCATION" $DISK_CONFIGS_FILE)"
+  if [ "$KEY_FILE_LOCATION" == "null" ]; then
+    unset KEY_FILE_LOCATION
+  fi
+}
+
+function usage()
+{
+  echo "dgcrypt [open|close] diskname"
+  echo "Relies on configuration file ~/.dgcrypt/disk_configs.json"
+  echo "Read comment at top of script for details..."
+}
+
+### MAIN ###
+if [ "$1" == "--help" ] || [ "$1" == "-h" ]; then
+  usage
+  exit 0
+fi
+#Args:
+ACTION="$1"
+DISKNAME="$2"
+
+check_dependencies
+
+if ! [ "$(whoami)" == "root" ]; then
+  echo "Error: run this using sudo"
+fi
+
+if [ "$ACTION" == "open" ]; then
+  open_disk "$DISKNAME"
+elif [ "$ACTION" == "close" ]; then
+  close_disk "$DISKNAME"
+else
+  echo
+fi

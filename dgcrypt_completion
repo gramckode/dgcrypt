@@ -1,0 +1,37 @@
+################################################################################
+# Bash completion script for dgcrypt
+# If you want to use tab-completion, then configure your shell to source it
+################################################################################
+function get_diskname_options()
+{
+  local DISK_CONFIGS_FILE=~/.dgcrypt/disk_configs.json
+  jq -r 'keys | join(" ")' "$DISK_CONFIGS_FILE"
+}
+
+function _dgcrypt_completion() 
+{
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    local first_opts="open close"
+    local second_opts="$(get_diskname_options)"
+
+    COMPREPLY=()
+
+    # If completing the command name (COMP_CWORD == 0) let bash do default (filenames)
+    if [[ $COMP_CWORD -eq 0 ]]; then
+        return 0
+    fi
+
+    # If completing the first argument (no arg yet, or cursor at arg 1)
+    if [[ $COMP_CWORD -eq 1 ]]; then
+        COMPREPLY=( $(compgen -W "$first_opts" -- "$cur") )
+        return 0
+    fi
+
+    # If the first argument is one of the known values, and we're completing arg 2
+    if [[ $COMP_CWORD -eq 2 ]]; then
+        COMPREPLY=( $(compgen -W "$second_opts" -- "$cur") )
+        return 0
+    fi
+}
+complete -F _dgcrypt_completion dgcrypt
+complete -F _dgcrypt_completion ./dgcrypt
